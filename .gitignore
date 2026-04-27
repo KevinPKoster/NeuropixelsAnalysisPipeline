@@ -1,0 +1,6 @@
+.ipynb_checkpoints/
+*.dat
+*.raw
+*.bin
+analyzer_output/
+phy_folder/
