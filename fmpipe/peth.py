@@ -269,6 +269,37 @@ def load_matched_peth(cfg: SessionConfig, n_events: int, subset: str = "all", re
     return out
 
 
+def peak_change(res: dict, window=None) -> dict:
+    """
+    Effect size that does NOT grow with the number of events, for comparing sessions.
+
+    z = (PSTH - null mean) / null SD, and the null SD of a trial-averaged PSTH shrinks as
+    1/sqrt(N), so z ~ effect x sqrt(N): a session with twice the reaches gets ~1.41x the z for
+    identical biology. The numerator does not have that problem. `null_mean` is the unit's rate
+    at randomly placed event times - its own baseline, smoothed identically - so
+
+        delta Hz  = PSTH - null mean            (signed, at the bin of largest |delta|)
+        % change  = 100 x delta Hz / null mean
+
+    are unbiased by N; only their uncertainty improves with more events.
+
+    -> dict of per-unit arrays in the same order as res['units'].
+    """
+    c = res["centers"]
+    rw = tuple(window or res.get("response_win", PETH_DEFAULTS["response_win"]))
+    m = (c >= rw[0]) & (c < rw[1])
+    d = res["psth"] - res["null_mean"]                 # Hz above/below baseline, per bin
+    dr = d[:, m]
+    k = np.argmax(np.abs(dr), axis=1)
+    i = np.arange(len(dr))
+    base = res["null_mean"][:, m][i, k]                 # baseline at the same bin
+    delta = dr[i, k]
+    return dict(delta_hz=delta, baseline_hz=base,
+                pct_change=100.0 * np.divide(delta, base, out=np.zeros_like(delta),
+                                             where=base > 0),
+                latency_s=c[m][k], window=np.array(rw, float))
+
+
 def load_reach_peth(cfg: SessionConfig, subset: str = "all") -> dict:
     d = np.load(cfg.analysis_dir / "peth" / f"reach_peth_{subset}.npz", allow_pickle=False)
     import pandas as pd

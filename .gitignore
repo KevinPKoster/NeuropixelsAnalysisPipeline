@@ -3,4 +3,5 @@
 *.raw
 *.bin
 analyzer_output/
-phy_folder/
+phy_folder/__pycache__/
+*.pyc

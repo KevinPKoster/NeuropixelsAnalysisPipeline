@@ -235,3 +235,95 @@ Isolated venv in %TEMP% (brainglobe-atlasapi, Allen CCF 25 um); nothing installe
 
 ### Not done yet
 Behaviour-state-matched null; confirm the track with histology / Pinpoint and then decide the final region scheme (and the DV geometry fix); recheck the flagged noise-labelled units in Phy.
+
+## 2026-10-19 - stage 7: paw kinematics vs firing (`fmpipe/kinematics.py`)
+
+New module, nothing earlier was rerun: it reads `dlc_alignment/`, `units/`, `peak_detection/` and `peth/` only.
+Region labels untouched (histology still pending). Outputs per session: `kinematics/reach_kinematics_<subset>.npz`,
+`kinematics/speed_coupling.csv`, `kinematics/kinematics_meta.json`, `qc/kinematics_<subset>.png`.
+
+- `kinematics()`: marker position and speed on the camera frame grid. x/y are smoothed and differentiated WITHIN
+  contiguous tracked runs, never across a dropout, and a `seg_id` marks the run so plots can break the line.
+- **DLC jump rejection** (`max_jump_px`, default 15 px/frame = 3000 px/s at 200 Hz). DLC sometimes places the marker
+  confidently on the wrong thing: within-segment steps reach 151 px in 5 ms (21,163 px/s) on Sept 16. 1000 frames
+  (0.27%) are rejected. This matters for the numbers, not just the pictures - before the fix the mean reach-aligned
+  speed peaked at ~1200 px/s and the session-wide median |r| was 0.04; after, ~500 px/s and 0.07.
+- `frame_rate()`: one unit's rate on the same frame grid, so a trajectory can be coloured by firing.
+- `speed_coupling()`: r(rate, speed) vs lag over the whole session on confidently tracked frames, null = 200 circular
+  shifts of the rate (preserves rate autocorrelation and the time structure of tracking).
+  **This test is confounded**: the paw is only tracked while reaching (48% of frames on Sept 16), so a unit that simply
+  fires more during reaches correlates with speed. Sept 16: 125/174 units "coupled", median |r| 0.06-0.07. Do not report it alone.
+- `trialwise_coupling()`: the test that isolates movement. The across-event mean is removed from both speed and rate at
+  every time bin, leaving trial-to-trial deviations from the average reach; null = 200 permutations of which event's rate
+  residual pairs with which event's speed residual, taking max |r| over the whole lag grid so the best-lag search is
+  included in the null. Units with < 2 spikes/event in the window are excluded (before this, the top "hit" on Sept 16 was
+  unit 274 with r = +0.22 built from 57 spikes across all 66 events).
+- Sept 16 (66 bouts, 9547 tracked (event,bin) pairs): **24/151 units at p < 0.05 vs 7.6 expected (binomial p = 5.5e-07)**;
+  CFA 13/61 (median |r| 0.11, median best lag +0.04 s), thalamus 9/80 (median |r| 0.11, +0.12 s). Effect sizes are small
+  and the lag estimates are not well resolved with 66 events; this says firing covaries with how the paw moved on a given
+  reach, beyond the stereotyped reach, not that these are speed-coding cells.
+- Figure `plot_kinematics()`: trajectories coloured by time; mean kinematics with the tracking-coverage trace and grey
+  shading where < 40% of events are tracked (coverage runs 11% to 73% across the window on Sept 16, so the pre-onset mean
+  is a small self-selected subset of reaches); population |z| on the same time axis; both coupling tests; and two example
+  units' trajectories coloured by their own instantaneous rate.
+
+### Caveats
+Window coverage is driven by tracking, not by behaviour - the paw leaves the camera's view between reaches, so everything
+before reach onset rests on few events. All of the above is within-session; nothing is matched across days yet.
+
+## 2026-10-20 - grant figures + an N-independent effect size (`fmpipe/grantfig.py`, `peth.peak_change`)
+
+Presentation layer for Jason Maclean's R01. `grantfig.py` reads `peth/reach_peth_<subset>.npz` and draws; no analysis
+in it. Outputs in `D:\4103_plots\jason_grant_figures\` as 300 dpi PNG + PDF.
+
+- `stacked_peth_by_day`: all five days side by side, CFA heatmap above thalamus, cropped to -1..+1 s, shared colour
+  scale +-7.5, units grouped excited / suppressed / unmodulated and sorted by peak latency WITHIN the displayed window.
+  Bottom row is mean |Z| of modulated units (mean rate was tried first and is flat - excited and suppressed cancel).
+- `exemplar_rasters`: raster above, rate below, in the reading order of the old `PETHforTopUnits` notebook; 10 excited
+  and 8 suppressed units picked by |peak Z| and alternated between CFA and thalamus, each unit's own baseline
+  (`null_mean`) drawn as a dashed line.
+- `peth.peak_change`: delta Hz and % change from `null_mean` (the unit's rate at randomly placed events, smoothed
+  identically), at the bin of largest |change| in the response window.
+
+**Event-count finding (changes how across-day comparisons must be done).** z ~ effect x sqrt(N) because the null SD of a
+trial-averaged PSTH falls as 1/sqrt(N). delta Hz does NOT fix this: across the five days r(N, median |peak z|) = +0.35
+but r(N, median |delta Hz|) = **-0.99**. The cause is not selection on significance and not peak-picking - |delta Hz|
+stays at r = -0.95 when computed over ALL units and averaged over the whole window, because |.| of a noisy estimate is
+positively biased and the bias falls as 1/sqrt(N). Subsampling every day to 23 reaches (200 draws, metric computed per
+draw) narrows the spread from 2.96-5.15 Hz to 4.10-5.28 Hz; a residual trend (r = -0.88, n = 5 days) remains and is NOT
+explained by reach density (Sept 14 has the shortest median inter-bout interval, 13.5 s, and Sept 18 one of the longest,
+29.6 s, yet both give the largest |delta Hz|). With five days this residual should not be interpreted.
+Practical rule: **match the number of reaches before comparing days, whatever the metric**; report delta Hz / % change
+at matched N for interpretability, and keep z as the within-session detector only.
+
+- Regions in Hz are similar (excited medians: CFA +4.3 to +7.0, thalamus +4.4 to +8.6) but as % of baseline CFA moves
+  more (excited medians: CFA 78-152%, thalamus 45-87%), because CFA baselines are lower (~5-8 Hz vs ~9-16 Hz). Which
+  metric is reported therefore changes which region looks more strongly modulated; say which one is being used.
+- Peak latencies pooled over days: CFA and thalamus medians both -0.112 s (Mann-Whitney p = 0.29, n = 231 / 241) - no
+  CFA-before-thalamus ordering. Most peaks precede reach onset, consistent with a zone-crossing threshold firing partway
+  into the movement rather than at its start; a movement-onset criterion (bottom camera) is needed before any latency
+  claim.
+
+## 2026-10-20 - alignment audit (no code changed; verification only)
+
+Re-derived the timebase from the raw Open Ephys files and compared against what the pipeline saved, after the
+freely-moving PETHs looked much broader than the head-fixed ones (030926 notebook).
+
+- Convention is identical to the old notebook: t0 = NP continuous timestamps[0]; canonical = absolute - t0;
+  spikes = kilosort samples / 30000 with NO extra offset. The old notebook auto-detected that offset and also got 0.
+  `fmpipe` hard-codes 0 and only guards that spikes fall inside 0..duration, so a wrong anchor would not be caught;
+  the error it would cause is the NI-vs-NP stream start difference, which is -6.2 to +16.7 ms across Sept 14-18.
+- t0 matches to 0.0 us on all five days; TTL pins 0/2/4 recomputed from `full_words` match the saved files to 0.0 ns.
+- Sync fit (NP vs NI 1 Hz pulses, 2237-4592 pairs/day): |slope-1| 5e-10 to 3e-8, |offset| <= 13 us, residual std
+  18-27 us. The two clocks agree to microseconds; no drift correction is warranted.
+- Frame times: 100.00% of them are exact camera-TTL rising edges on every day (mapping is via the camera's own
+  counter, so dropped frames cannot shift it).
+- Hardware-artefact test was INCONCLUSIVE, not passing: there is no sharp stimulus artefact to find (opto pin 2 has
+  only 3-8 pulses/day; largest population deviation 2.6-4.4 SD at scattered latencies from -160 to +140 ms). It
+  neither confirms nor refutes the alignment.
+
+**Offset vs jitter.** A constant timing error would shift the PETH peak while keeping it sharp; the observed responses
+are broad instead. Re-aligning to the bout PEAK (a tighter kinematic landmark than zone entry) narrows the population
+response on 4 of 5 days: FWHM 560->500, 890->640, 1260->950, 970->560, 410->180 ms for 09-14..18. So the flattening is
+consistent with jitter in the reach-onset estimate (zone crossing + patchy DLC), not with a clock mismatch. Caveat: on
+09-17 and 09-18 the population bump peaks at the -1 s window edge, so those FWHM values are not well constrained.
